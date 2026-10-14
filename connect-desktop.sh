@@ -6,9 +6,11 @@
 # Usage: ./connect-desktop.sh <sprite-name> [local-shared-dir]
 set -euo pipefail
 
+here="$(cd "$(dirname "$0")" && pwd)"
 name="${1:?usage: connect-desktop.sh <sprite-name> [local-shared-dir]}"
 share_dir="${2:-${SHARE_DIR:-$HOME/Documents}}"
 port="${LOCAL_PORT:-13389}"
+keepalive_dur="${KEEPALIVE:-8h}"
 pass_file="${SPRITE_PASS_FILE:-$HOME/.config/sprites/$name.pass}"
 
 if [ ! -d "$share_dir" ]; then
@@ -59,6 +61,10 @@ else
   install -d -m700 "$(dirname "$pass_file")"
   printf '%s' "$rdp_pass" > "$pass_file"
   chmod 600 "$pass_file"
+fi
+
+if [ "$keepalive_dur" != "off" ]; then
+  "$here/keepalive.sh" "$name" "$keepalive_dur"
 fi
 
 rdp_args=(

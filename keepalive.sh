@@ -28,11 +28,8 @@ parse_duration() {
 case "$action" in
   off|stop|cancel)
     sprite exec -s "$name" -- bash -c '
-      if [ -f /tmp/sprite-keepalive.pid ]; then
-        kill "$(cat /tmp/sprite-keepalive.pid)" 2>/dev/null || true
-        rm -f /tmp/sprite-keepalive.pid /tmp/sprite-keepalive.until
-      fi
-      pkill -f "sprite-keepalive-worker" 2>/dev/null || true
+      rm -f ~/.local/state/sprite-keepalive.until
+      sprite-env services delete keepalive >/dev/null 2>&1 || true
       sprite-env curl -s -X DELETE /v1/tasks/keepalive >/dev/null 2>&1 || true
     '
     echo "Keepalive stopped on '$name'. Sprite will pause when idle."
@@ -40,8 +37,8 @@ case "$action" in
 
   status)
     sprite exec -s "$name" -- bash -c '
-      if [ -f /tmp/sprite-keepalive.until ]; then
-        until_ts="$(cat /tmp/sprite-keepalive.until)"
+      if [ -f ~/.local/state/sprite-keepalive.until ]; then
+        until_ts="$(cat ~/.local/state/sprite-keepalive.until)"
         now_ts="$(date +%s)"
         rem=$(( until_ts - now_ts ))
         if [ "$rem" -gt 0 ]; then
@@ -49,10 +46,10 @@ case "$action" in
             $((rem/3600)) $(((rem%3600)/60)) $((rem%60)) \
             "$(date -u -d "@$until_ts" "+%Y-%m-%d %H:%M:%S")"
         else
-          echo "Keepalive loop finished."
+          echo "Keepalive timer expired."
         fi
       else
-        echo "No multi-hour keepalive timer recorded."
+        echo "No active keepalive timer."
       fi
       echo -n "Tasks API state: "
       sprite-env curl -s /v1/tasks
@@ -70,43 +67,55 @@ case "$action" in
       exit 1
     fi
 
+    # Note: `sprite exec` kills its child process group on exit, so the worker
+    # MUST run as a Sprite service (`sprite-env services`) rather than `nohup &`.
     sprite exec -s "$name" --env "DURATION_SEC=$seconds" -- bash -c '
       set -e
-      # Stop any existing keepalive worker first
-      if [ -f /tmp/sprite-keepalive.pid ]; then
-        kill "$(cat /tmp/sprite-keepalive.pid)" 2>/dev/null || true
-        rm -f /tmp/sprite-keepalive.pid /tmp/sprite-keepalive.until
-      fi
-      pkill -f "sprite-keepalive-worker" 2>/dev/null || true
-
+      install -d -m700 ~/.local/bin ~/.local/state
       until_ts=$(( $(date +%s) + DURATION_SEC ))
-      echo "$until_ts" > /tmp/sprite-keepalive.until
+      echo "$until_ts" > ~/.local/state/sprite-keepalive.until
 
-      # Acquire initial lease immediately before backgrounding so the Sprite
-      # cannot pause right as `sprite exec` disconnects.
+      cat << "EOF" > ~/.local/bin/sprite-keepalive-worker
+#!/usr/bin/env bash
+set -u
+until_file="$HOME/.local/state/sprite-keepalive.until"
+
+while true; do
+  if [ ! -f "$until_file" ]; then
+    break
+  fi
+  until_ts="$(cat "$until_file" 2>/dev/null || echo 0)"
+  now="$(date +%s)"
+  rem=$(( until_ts - now ))
+  if [ "$rem" -le 0 ]; then
+    rm -f "$until_file"
+    break
+  fi
+  # Tasks API max lease is 1h (3600s); use up to 5m (300s) and refresh every 60s.
+  lease=$(( rem < 300 ? rem : 300 ))
+  sprite-env curl -s -X PUT /v1/tasks/keepalive \
+    -H "Content-Type: application/json" \
+    -d "{\"expire\":\"${lease}s\"}" >/dev/null 2>&1 || true
+  sleep_sec=$(( rem < 60 ? rem : 60 ))
+  sleep "$sleep_sec"
+done
+
+sprite-env curl -s -X DELETE /v1/tasks/keepalive >/dev/null 2>&1 || true
+sprite-env services delete keepalive >/dev/null 2>&1 || true
+EOF
+      chmod +x ~/.local/bin/sprite-keepalive-worker
+
+      # Acquire initial lease synchronously right now so the Sprite stays awake
+      # while the service spins up.
       first_lease=$(( DURATION_SEC < 300 ? DURATION_SEC : 300 ))
       sprite-env curl -s -X PUT /v1/tasks/keepalive \
         -H "Content-Type: application/json" \
         -d "{\"expire\":\"${first_lease}s\"}" >/dev/null
 
-      nohup bash -c "
-        # tag for pkill: sprite-keepalive-worker
-        trap \"sprite-env curl -s -X DELETE /v1/tasks/keepalive >/dev/null 2>&1 || true; rm -f /tmp/sprite-keepalive.pid /tmp/sprite-keepalive.until\" EXIT
-        while true; do
-          now=\$(date +%s)
-          rem=\$(( $until_ts - now ))
-          if [ \"\$rem\" -le 0 ]; then
-            break
-          fi
-          lease=\$(( rem < 300 ? rem : 300 ))
-          sprite-env curl -s -X PUT /v1/tasks/keepalive \
-            -H \"Content-Type: application/json\" \
-            -d \"{\\\"expire\\\":\\\"\${lease}s\\\"}\" >/dev/null
-          sleep_sec=\$(( rem < 60 ? rem : 60 ))
-          sleep \"\$sleep_sec\"
-        done
-      " >/dev/null 2>&1 < /dev/null &
-      echo $! > /tmp/sprite-keepalive.pid
+      sprite-env services delete keepalive >/dev/null 2>&1 || true
+      sprite-env services create keepalive \
+        --cmd "$HOME/.local/bin/sprite-keepalive-worker" \
+        --no-stream >/dev/null
     '
 
     hours=$(( seconds / 3600 ))
