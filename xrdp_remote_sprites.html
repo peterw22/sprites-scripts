@@ -1,0 +1,253 @@
+<title>Using Sprite as a Remote Desktop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: single reading column, a terminal-toned code surface, one connection diagram as the only flourish */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --fg: #1b2129;
+  --muted: #5b6573;
+  --rule: #dde1e7;
+  --accent: #1d6b86;
+  --accent-soft: #e2eff4;
+  --code-bg: #141a21;
+  --code-fg: #dfe6ee;
+  --code-dim: #7f8b99;
+  --code-hl: #7fc8de;
+  --inline-bg: #e9ecf1;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161c; --surface: #171d25; --fg: #e3e8ee; --muted: #98a3b1; --rule: #28313c;
+    --accent: #6fc0db; --accent-soft: #19303a; --code-bg: #0b0f14; --code-fg: #dfe6ee;
+    --code-dim: #77838f; --code-hl: #7fc8de; --inline-bg: #222a34; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161c; --surface: #171d25; --fg: #e3e8ee; --muted: #98a3b1; --rule: #28313c;
+  --accent: #6fc0db; --accent-soft: #19303a; --code-bg: #0b0f14; --code-fg: #dfe6ee;
+  --code-dim: #77838f; --code-hl: #7fc8de; --inline-bg: #222a34; color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 1.0625rem/1.7 var(--font-body);
+  padding-inline: 16px;
+  padding-block: 3rem 5rem;
+}
+article { max-width: 44rem; margin-inline: auto; display: flex; flex-direction: column; gap: 1.15rem; }
+article > * { margin: 0; min-width: 0; }
+
+.eyebrow {
+  font: 600 0.75rem/1 var(--font-mono);
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent);
+}
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.15; }
+h1 { font-size: clamp(2.1rem, 6vw, 3.1rem); font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: 1.65rem; font-weight: 700; margin-top: 1.6rem; padding-top: 1.6rem; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.2rem; font-weight: 600; margin-top: 0.6rem; }
+.meta { color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+.lede { font-size: 1.15rem; }
+
+a { color: var(--accent); text-underline-offset: 0.18em; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+strong { font-weight: 600; }
+
+code {
+  font-family: var(--font-mono); font-size: 0.86em;
+  background: var(--inline-bg); padding: 0.1em 0.35em; border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.code {
+  position: relative; background: var(--code-bg); color: var(--code-fg);
+  border-radius: 8px; overflow: hidden;
+}
+.code pre {
+  margin: 0; padding: 1rem 1.1rem; overflow-x: auto;
+  font: 0.82rem/1.65 var(--font-mono); tab-size: 2;
+}
+.code pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+.code .c { color: var(--code-dim); }
+.code .p { color: var(--code-hl); user-select: none; }
+.copy {
+  position: absolute; top: 0.5rem; right: 0.5rem;
+  font: 600 0.7rem/1 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--code-fg); background: transparent; border: 1px solid var(--code-dim);
+  border-radius: 5px; padding: 0.4rem 0.55rem; cursor: pointer; opacity: 0.75;
+}
+.copy:hover { opacity: 1; }
+
+/* Connection path diagram */
+.path {
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.5rem;
+  font: 0.8rem/1.35 var(--font-mono);
+  padding: 1rem; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+}
+.hop { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.55rem 0.7rem; border-radius: 6px; background: var(--accent-soft); flex: 1 1 8.5rem; min-width: 0; }
+.hop b { font-weight: 600; color: var(--fg); }
+.hop span { color: var(--muted); overflow-wrap: anywhere; }
+.arrow { align-self: center; color: var(--accent); font-weight: 600; }
+.where { flex-basis: 100%; display: flex; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; }
+@media (max-width: 560px) { .arrow { display: none; } }
+
+/* Gotchas */
+.walls { display: flex; flex-direction: column; gap: 1.1rem; padding-left: 1rem; border-left: 2px solid var(--rule); }
+.walls > div { display: flex; flex-direction: column; gap: 0.3rem; }
+.walls h4 { margin: 0; font: 600 0.95rem/1.4 var(--font-mono); color: var(--accent); overflow-wrap: anywhere; }
+.walls p { margin: 0; }
+
+ul.clients { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; }
+
+figure { display: flex; flex-direction: column; gap: 0.5rem; }
+figure img { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--rule); display: block; }
+figcaption { color: var(--muted); font-size: 0.85rem; }
+
+footer { margin-top: 2rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.85rem; }
+</style>
+
+<article>
+  <p class="eyebrow">Cloud notes</p>
+  <h1>Using Sprite as a Remote Desktop</h1>
+  <p class="meta">Tingou Wu · Oct 9, 2026</p>
+
+  <p class="lede">In the <a href="https://tingouw.com/blog/cloud_notes/vscode_remote_sprites">last post</a> I turned a Sprite into a remote dev box that I reach over SSH from VS Code. That covers 90% of my work. The other 10% needs a screen: a GUI app, a browser pointed at something only reachable from inside the box, or a tool that just refuses to run headless.</p>
+  <p>So let's put a real desktop on it. The plan is XFCE as the desktop, xrdp as the RDP server, and the same SSH setup from last time as the tunnel. No new ports exposed, and the Sprite still sleeps when I walk away.</p>
+
+  <div class="path" role="img" aria-label="Connection path: RDP client to localhost port 13389, through an SSH tunnel or sprite proxy, to xrdp on the Sprite's loopback port 3389, which serves an Xorg and XFCE session.">
+    <div class="where"><span>Your laptop</span><span>The Sprite</span></div>
+    <div class="hop"><b>RDP client</b><span>localhost:13389</span></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="hop"><b>Tunnel</b><span>ssh -L or sprite proxy</span></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="hop"><b>xrdp</b><span>127.0.0.1:3389</span></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="hop"><b>Xorg + XFCE</b><span>display :10</span></div>
+  </div>
+
+  <h2 id="why-xrdp">Why xrdp?</h2>
+  <p>I could have gone with VNC, but RDP clients are just better. Every OS has a good one, they handle resizing and clipboard, and xrdp gives each login its own X session instead of mirroring a physical screen (which a Sprite doesn't have anyway).</p>
+
+  <h2 id="sprite-side-setup">Sprite-side setup</h2>
+  <p>This assumes you already did the <a href="https://tingouw.com/blog/cloud_notes/vscode_remote_sprites#sprite-side-setup">Sprite-side setup</a> from the last post, so sshd and your key are in place.</p>
+
+  <h3 id="install">Install the desktop</h3>
+  <div class="code"><button class="copy" type="button">Copy</button><pre><code>sprite exec -s my-blog -- bash -c '
+set -e
+export DEBIAN_FRONTEND=noninteractive
+
+<span class="c"># Ubuntu only ships Firefox as a snap, and snaps need systemd.</span>
+<span class="c"># Use the .deb from Mozilla APT repo instead, pinned above the snap stub.</span>
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg | sudo tee /etc/apt/keyrings/packages.mozilla.org.asc &gt;/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" | sudo tee /etc/apt/sources.list.d/mozilla.list &gt;/dev/null
+printf "Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n" | sudo tee /etc/apt/preferences.d/mozilla &gt;/dev/null
+
+sudo --preserve-env=DEBIAN_FRONTEND apt-get update
+sudo --preserve-env=DEBIAN_FRONTEND apt-get install -y xrdp xorgxrdp xfce4 xfce4-terminal dbus-x11 firefox
+
+<span class="c"># Listen on loopback only. We come in through a tunnel.</span>
+sudo sed -i "0,/^port=3389/s//port=tcp:\/\/127.0.0.1:3389/" /etc/xrdp/xrdp.ini
+
+<span class="c"># xrdp runs as the xrdp user and has to reach the per-session sockets.</span>
+sudo sed -i "s/^#\?SessionSockdirGroup=.*/SessionSockdirGroup=xrdp/" /etc/xrdp/sesman.ini
+
+<span class="c"># Start XFCE when you log in over RDP.</span>
+echo startxfce4 &gt; ~/.xsession
+
+<span class="c"># The sprite user gets a password for xrdp. Keep SSH key-only.</span>
+echo "PasswordAuthentication no" | sudo tee /etc/ssh/sshd_config.d/10-no-password.conf &gt;/dev/null
+if pgrep -x sshd &gt;/dev/null; then sudo service ssh reload; fi
+
+<span class="c"># No systemd on a Sprite, so let the Sprite runtime supervise xrdp.</span>
+sprite-env services create xrdp-sesman --cmd sudo \
+  --args "sh,-c,. /usr/share/xrdp/socksetup &amp;&amp; exec /usr/sbin/xrdp-sesman --nodaemon" --no-stream
+sprite-env services create xrdp --cmd sudo \
+  --args "-u,xrdp,/usr/sbin/xrdp,--nodaemon" --needs xrdp-sesman --no-stream'</code></pre></div>
+
+  <p>The install takes about four minutes. A few of those lines deserve an explanation, because each one is a wall I hit.</p>
+
+  <div class="walls">
+    <div>
+      <h4>SessionSockdirGroup=xrdp</h4>
+      <p>Without this you log in, the session starts, and you get a black screen with <code>connection problem, giving up</code> in the log. On Ubuntu, the <code>xrdp</code> daemon drops to an unprivileged <code>xrdp</code> user, but the session manager creates each user's socket directory with group <code>root</code> by default, so xrdp can't open the socket for the X session it just started. Setting the group to <code>xrdp</code> fixes it.</p>
+    </div>
+    <div>
+      <h4>The Mozilla repo</h4>
+      <p>On Ubuntu, <code>apt install firefox</code> installs a stub package (<code>1snap1</code>) that pulls in the snap. Snaps need snapd, and snapd needs systemd, so that dead-ends on a Sprite. Mozilla publishes a regular <code>.deb</code> in its own <a href="https://support.mozilla.org/kb/install-firefox-linux">APT repo</a>, and the pin with priority 1000 makes apt pick it over Ubuntu's stub.</p>
+    </div>
+    <div>
+      <h4>--preserve-env=DEBIAN_FRONTEND, not sudo -E</h4>
+      <p>My first version used <code>sudo -E apt-get</code>. That keeps <code>HOME=/home/sprite</code> for root, so a package's post-install hook created <code>~/.cache</code> owned by root with mode 700. Everything looked fine until I clicked Firefox in the menu and got "Your Firefox profile cannot be loaded". Firefox keeps part of its profile under <code>~/.cache</code> and couldn't write there. Passing only the variable apt needs keeps root's <code>HOME</code> at <code>/root</code>.</p>
+    </div>
+    <div>
+      <h4>sprite-env services</h4>
+      <p>A Sprite has no systemd (PID 1 is <code>tini</code>), so <code>systemctl enable xrdp</code> is not a thing. In the last post I got away with starting sshd on demand from the ProxyCommand. For xrdp I'm using Sprite <a href="https://docs.fly.io/sprites/concepts/services">Services</a> instead. The runtime starts them at boot, restarts them if they crash, and brings them back after a cold wake. Services run as the <code>sprite</code> user, hence the <code>sudo</code>. <code>/run</code> is a tmpfs that gets wiped on a cold boot, which is why sesman runs xrdp's <code>socksetup</code> first to recreate <code>/run/xrdp</code>. Services also don't keep the Sprite awake by themselves, so an idle xrdp costs nothing.</p>
+    </div>
+  </div>
+
+  <h3 id="password">Set a password</h3>
+  <p>xrdp logs you in through PAM, so the <code>sprite</code> user needs a password. This is also why the step above turns off password auth for SSH: SSH stays key-only.</p>
+  <div class="code"><button class="copy" type="button">Copy</button><pre><code>sprite exec -s my-blog --tty -- sudo passwd sprite</code></pre></div>
+  <p>That's it for the Sprite-side setup.</p>
+
+  <h2 id="client-setup">Client setup</h2>
+
+  <h3 id="tunnel">Open the tunnel</h3>
+  <p>xrdp only listens on the Sprite's <code>127.0.0.1:3389</code>, so forward a local port to it over the SSH config from last time:</p>
+  <div class="code"><button class="copy" type="button">Copy</button><pre><code>ssh -S none -N -L 13389:127.0.0.1:3389 my-blog.spr.internal</code></pre></div>
+  <p>The ProxyCommand wakes the Sprite and starts sshd like before, and the Sprite runtime has already brought up xrdp. Leave this running while you use the desktop, and press <code>Ctrl-C</code> when you're done.</p>
+  <p>The <code>-S none</code> matters. With the <code>ControlPersist</code> setting from the last post, a plain <code>ssh -N -L</code> forks into a background control master and keeps the tunnel open after you think you closed it. An open connection keeps the Sprite awake, and an awake Sprite bills. <code>-S none</code> skips connection sharing for the tunnel, so <code>Ctrl-C</code> actually closes it.</p>
+  <p>If you don't want SSH in the picture at all, <code>sprite proxy</code> does the same thing:</p>
+  <div class="code"><button class="copy" type="button">Copy</button><pre><code>sprite proxy -s my-blog 13389:3389</code></pre></div>
+
+  <h3 id="rdp-client">Connect an RDP client</h3>
+  <p>Point any RDP client at <code>localhost:13389</code> and log in as <code>sprite</code> with the password you set.</p>
+  <ul class="clients">
+    <li><strong>macOS / Windows</strong>: Microsoft's Windows App (formerly Microsoft Remote Desktop). Add a PC with <code>localhost:13389</code> as the address.</li>
+    <li><strong>Linux</strong>: FreeRDP.</li>
+  </ul>
+  <div class="code"><button class="copy" type="button">Copy</button><pre><code>xfreerdp /v:localhost:13389 /u:sprite /dynamic-resolution</code></pre></div>
+  <p>xrdp uses a self-signed certificate, so the client asks you to trust it the first time.</p>
+
+  <figure>
+    <img src="desktop.png" alt="XFCE desktop running on a Sprite over xrdp" width="1280" height="800">
+    <figcaption>XFCE on the Sprite, seen through FreeRDP.</figcaption>
+  </figure>
+
+  <p>And there it is: a full XFCE desktop on the Sprite, on the same box VS Code is already connected to. Firefox runs fine too:</p>
+
+  <figure>
+    <img src="firefox.png" alt="Firefox running inside the Sprite desktop, showing this blog" width="1600" height="1000" loading="lazy">
+    <figcaption>Firefox from Mozilla's APT repo, running inside the Sprite.</figcaption>
+  </figure>
+
+  <p>When I'm done, I close the RDP window and <code>Ctrl-C</code> the tunnel, and nothing is left holding the Sprite awake.</p>
+
+  <footer>Tingou Wu © 2026</footer>
+</article>
+
+<script>
+document.querySelectorAll(".code").forEach(function (block) {
+  var btn = block.querySelector(".copy");
+  var code = block.querySelector("code");
+  btn.addEventListener("click", function () {
+    var text = code.innerText;
+    var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1500); };
+    var fallback = function () {
+      var range = document.createRange(); range.selectNodeContents(code);
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      btn.textContent = "Selected";
+    };
+    try {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } catch (e) { fallback(); }
+  });
+});
+</script>
